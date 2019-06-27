@@ -58,6 +58,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import java.util.concurrent.TimeUnit;
 
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 
@@ -67,6 +68,11 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * Google Cloud Storage batch requests are limited to 1000 operations
      **/
     private static final int MAX_BATCHING_REQUESTS = 999;
+    
+    /**
+     * HSM Retries on request quota exceeded - Throttling of maximum 60 seconds 
+     **/
+    private static final int MAX_RETRIES_HSM=15; 
 
     private final Storage client;
     private final String bucket;
@@ -190,7 +196,9 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      */
     InputStream readBlob(String blobName) throws IOException {
         return doPrivileged(() -> {
+            Boolean executionSuccessful = true;
             try {
+                 
                 Storage.Objects.Get object = client.objects().get(bucket, blobName);
                 return object.executeMediaAsInputStream();
             } catch (GoogleJsonResponseException e) {
@@ -198,7 +206,41 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                 if ((e.getStatusCode() == HTTP_NOT_FOUND) || ((error != null) && (error.getCode() == HTTP_NOT_FOUND))) {
                     throw new NoSuchFileException(e.getMessage());
                 }
-                throw e;
+                logger.warn("Quota exceeded - Throttling 1st try");
+                executionSuccessful = false;
+                TimeUnit.SECONDS.sleep(8);
+                return readBlob(blobName,1);
+            }
+        });
+    }
+
+    /** ADDITION OF A SECONDARY readBlob method that is being used for recursive retries with a hard stop specified by MAX_RETRIES_HSM
+     * Returns an {@link java.io.InputStream} for a given blob
+     *
+     * @param blobName name of the blob
+     * @param retryPosition current round of throttling for blob fetch - HSM Quota limit
+     * @return an InputStream
+     */
+    InputStream readBlob(String blobName, Integer retryPosition) throws IOException {
+        return doPrivileged(() -> {
+            Boolean executionSuccessful = true;
+            try {
+                
+                Storage.Objects.Get object = client.objects().get(bucket, blobName);
+                return object.executeMediaAsInputStream();
+            } catch (GoogleJsonResponseException e) {
+                GoogleJsonError error = e.getDetails();
+                if ((e.getStatusCode() == HTTP_NOT_FOUND) || ((error != null) && (error.getCode() == HTTP_NOT_FOUND))) {
+                    throw new NoSuchFileException(e.getMessage());
+                }
+                if(retryPosition < MAX_RETRIES_HSM){
+                    logger.warn("Quota exceeded - Throttling " + retryPosition.toString() + " try");
+                    executionSuccessful = false;
+                    TimeUnit.SECONDS.sleep(8);
+                    return readBlob(blobName, retryPosition+1);
+                }else{
+                    throw e;
+                }
             }
         });
     }
@@ -315,7 +357,8 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
     void moveBlob(String sourceBlob, String targetBlob) throws IOException {
         doPrivileged(() -> {
             // There's no atomic "move" in GCS so we need to copy and delete
-            client.objects().copy(bucket, sourceBlob, bucket, targetBlob, null).execute();
+            // client.objects().copy(bucket, sourceBlob, bucket, targetBlob, null).execute();
+            client.objects().rewrite(bucket, sourceBlob, bucket, targetBlob,null).execute();
             client.objects().delete(bucket, sourceBlob).execute();
             return null;
         });
