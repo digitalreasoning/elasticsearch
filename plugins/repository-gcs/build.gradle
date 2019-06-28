@@ -18,7 +18,7 @@
  */
 
 esplugin {
-  description 'The GCS repository plugin adds Google Cloud Storage support for repositories.'
+  description 'The GCS repository plugin adds Google Cloud Storage support for repositories. Version: dr-1'
   classname 'org.elasticsearch.repositories.gcs.GoogleCloudStoragePlugin'
 }
 
