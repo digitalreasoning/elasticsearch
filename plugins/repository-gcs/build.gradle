@@ -17,14 +17,14 @@
  * under the License.
  */
 
-esplugin {
-  description 'The GCS repository plugin adds Google Cloud Storage support for repositories. Version: dr-1'
-  classname 'org.elasticsearch.repositories.gcs.GoogleCloudStoragePlugin'
-}
-
 versions << [
         'google': '1.23.0',
+        'rcbuild': 'dr-1'
 ]
+esplugin {
+  description "The GCS repository plugin adds Google Cloud Storage support for repositories. Version: ${versions.rcbuild}"
+  classname 'org.elasticsearch.repositories.gcs.GoogleCloudStoragePlugin'
+}
 
 dependencies {
   compile "com.google.apis:google-api-services-storage:v1-rev115-${versions.google}"
