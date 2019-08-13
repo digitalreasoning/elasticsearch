@@ -70,7 +70,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
     private static final int MAX_BATCHING_REQUESTS = 999;
     
     /**
-     * HSM Retries on request quota exceeded - Throttling of maximum 60 seconds 
+     * HSM Retries on request quota exceeded - Throttling for a maximum of 15 times
      **/
     private static final int MAX_RETRIES_HSM=15; 
 
@@ -196,7 +196,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      */
     InputStream readBlob(String blobName) throws IOException {
         return doPrivileged(() -> {
-            Boolean executionSuccessful = true;
+            
             try {
                  
                 Storage.Objects.Get object = client.objects().get(bucket, blobName);
@@ -206,8 +206,8 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                 if ((e.getStatusCode() == HTTP_NOT_FOUND) || ((error != null) && (error.getCode() == HTTP_NOT_FOUND))) {
                     throw new NoSuchFileException(e.getMessage());
                 }
-                logger.warn("Quota exceeded - Throttling 1st try");
-                executionSuccessful = false;
+                logger.warn("[repository-gcs][readBlob]Quota exceeded - Throttling 1st try");
+                
                 TimeUnit.SECONDS.sleep(8);
                 return readBlob(blobName,1);
             }
@@ -223,7 +223,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      */
     InputStream readBlob(String blobName, Integer retryPosition) throws IOException {
         return doPrivileged(() -> {
-            Boolean executionSuccessful = true;
+            
             try {
                 
                 Storage.Objects.Get object = client.objects().get(bucket, blobName);
@@ -234,8 +234,8 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                     throw new NoSuchFileException(e.getMessage());
                 }
                 if(retryPosition < MAX_RETRIES_HSM){
-                    logger.warn("Quota exceeded - Throttling " + retryPosition.toString() + " try");
-                    executionSuccessful = false;
+                    logger.warn("[repository-gcs][readBlob]Quota exceeded - Throttling " + retryPosition.toString() + " try");
+                    
                     TimeUnit.SECONDS.sleep(8);
                     return readBlob(blobName, retryPosition+1);
                 }else{
@@ -252,17 +252,42 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @param blobSize    expected size of the blob to be written
      */
     void writeBlob(String blobName, InputStream inputStream, long blobSize) throws IOException {
-        doPrivileged(() -> {
-            InputStreamContent stream = new InputStreamContent(null, inputStream);
-            stream.setLength(blobSize);
-
-            Storage.Objects.Insert insert = client.objects().insert(bucket, null, stream);
-            insert.setName(blobName);
-            insert.execute();
-            return null;
+         doPrivileged(() -> {
+			  return writeBlob(blobName, inputStream,  blobSize, 0);
         });
     }
 
+   /**
+     * Writes a blob in the bucket - Retry Mode 
+     *
+     * @param inputStream content of the blob to be written
+     * @param blobSize    expected size of the blob to be written
+     */
+    Object writeBlob(String blobName, InputStream inputStream, long blobSize,Integer retryPosition) throws IOException{
+		return doPrivileged( () -> {
+			try { 
+				InputStreamContent stream = new InputStreamContent(null, inputStream);
+				stream.setLength(blobSize);
+
+				Storage.Objects.Insert insert = client.objects().insert(bucket, null, stream);
+				insert.setName(blobName);
+				insert.execute();
+				return null;
+			}catch(GoogleJsonResponseException e){
+				if(retryPosition < MAX_RETRIES_HSM){
+					logger.warn("[repository-gcs][writeBlob] Lost session - Throttling try #" + retryPosition.toString() );
+					
+					TimeUnit.SECONDS.sleep(8);
+					writeBlob(blobName, inputStream, blobSize, retryPosition + 1);
+					return null;
+				}else{
+					throw e; 
+				}
+			}
+		});
+    }
+	
+	
     /**
      * Deletes a blob in the bucket
      *
