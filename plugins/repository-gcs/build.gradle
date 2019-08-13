@@ -19,7 +19,7 @@
 
 versions << [
         'google': '1.23.0',
-        'rcbuild': '5.6.16-dr-1'
+        'rcbuild': '5.6.16-dr-2'
 ]
 
 version = "${versions.rcbuild}"
