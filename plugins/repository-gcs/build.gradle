@@ -18,8 +18,9 @@
  */
 
 versions << [
-        'google': '1.23.0',
-        'rcbuild': '5.6.16-dr-2'
+        'google': '1.30.1',
+        'storage': 'v1-rev158-1.25.0',
+        'rcbuild': '5.6.16-dr-3'
 ]
 
 version = "${versions.rcbuild}"
@@ -31,7 +32,7 @@ esplugin {
 }
 
 dependencies {
-  compile "com.google.apis:google-api-services-storage:v1-rev115-${versions.google}"
+  compile "com.google.apis:google-api-services-storage:${versions.storage}"
   compile "com.google.api-client:google-api-client:${versions.google}"
   compile "com.google.oauth-client:google-oauth-client:${versions.google}"
   compile "org.apache.httpcomponents:httpclient:${versions.httpclient}"
@@ -40,6 +41,10 @@ dependencies {
   compile "commons-codec:commons-codec:${versions.commonscodec}"
   compile "com.google.http-client:google-http-client:${versions.google}"
   compile "com.google.http-client:google-http-client-jackson2:${versions.google}"
+  compile group: 'com.google.guava', name: 'guava', version: '23.5-jre' 
+  compile 'io.opencensus:opencensus-api:0.24.0'
+  compile 'io.opencensus:opencensus-contrib-http-util:0.24.0'
+  compile group: 'io.grpc', name: 'grpc-context', version: '1.23.0'
 }
 
 dependencyLicenses {
