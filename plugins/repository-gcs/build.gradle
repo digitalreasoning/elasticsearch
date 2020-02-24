@@ -17,6 +17,7 @@
  * under the License.
  */
 
+
 esplugin {
   description 'The GCS repository plugin adds Google Cloud Storage support for repositories. V.DR-3.1'
   classname 'org.elasticsearch.repositories.gcs.GoogleCloudStoragePlugin'
@@ -65,7 +66,3 @@ dependencyLicenses {
   mapping from: /protobuf.*/, to: 'protobuf'
   mapping from: /proto-google.*/, to: 'proto-google'
 }
-
-
-
-

@@ -65,6 +65,16 @@ configure(subprojects.findAll { it.projectDir.toPath().startsWith(rootPath) }) {
           }
         }
       }
+
+      repositories {
+        maven {
+          url = "https://artifacts.corp.digitalreasoning.com/artifactory/managed-third-party"
+          credentials {
+            username repoUsername
+            password repoPassword
+          }
+        }
+      }
     }
   }
   plugins.withType(BuildPlugin).whenPluginAdded {
