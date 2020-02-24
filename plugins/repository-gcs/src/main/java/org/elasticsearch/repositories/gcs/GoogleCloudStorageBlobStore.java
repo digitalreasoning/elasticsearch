@@ -70,9 +70,9 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
     private static final int MAX_BATCHING_REQUESTS = 999;
     
     /**
-     * HSM Retries on request quota exceeded - Throttling of maximum 60 seconds 
+     * HSM Retries on Service Gone errors, maximum 2 tries
      **/
-    private static final int MAX_RETRIES_HSM=15; 
+    private static final int MAX_RETRIES_HSM=3; 
 
     private final Storage client;
     private final String bucket;
@@ -109,7 +109,8 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      */
     boolean doesBucketExist(String bucketName) {
         try {
-            return doPrivileged(() -> {
+            logger.debug("Checking existence of bucket called " + bucketName);
+            return SocketAccess.doPrivilegedIOException(() -> {
                 try {
                     Bucket bucket = client.buckets().get(bucketName).execute();
                     if (bucket != null) {
@@ -136,7 +137,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @return a map of blob names and their metadata
      */
     Map<String, BlobMetaData> listBlobs(String path) throws IOException {
-        return doPrivileged(() -> listBlobsByPath(bucket, path, path));
+        return SocketAccess.doPrivilegedIOException(() -> listBlobsByPath(bucket, path, path));
     }
 
     /**
@@ -147,7 +148,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @return a map of blob names and their metadata
      */
     Map<String, BlobMetaData> listBlobsByPrefix(String path, String prefix) throws IOException {
-        return doPrivileged(() -> listBlobsByPath(bucket, buildKey(path, prefix), path));
+        return SocketAccess.doPrivilegedIOException(() -> listBlobsByPath(bucket, buildKey(path, prefix), path));
     }
 
     /**
@@ -171,8 +172,9 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @return true if the blob exists, false otherwise
      */
     boolean blobExists(String blobName) throws IOException {
-        return doPrivileged(() -> {
+        return SocketAccess.doPrivilegedIOException(() -> {
             try {
+                logger.debug("Checking existence of blob called " + blobName);
                 StorageObject blob = client.objects().get(bucket, blobName).execute();
                 if (blob != null) {
                     return Strings.hasText(blob.getId());
@@ -195,10 +197,10 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @return an InputStream
      */
     InputStream readBlob(String blobName) throws IOException {
-        return doPrivileged(() -> {
-            Boolean executionSuccessful = true;
+        return SocketAccess.doPrivilegedIOException(() -> {
+            
             try {
-                 
+                logger.debug("Reading blob called " + blobName);
                 Storage.Objects.Get object = client.objects().get(bucket, blobName);
                 return object.executeMediaAsInputStream();
             } catch (GoogleJsonResponseException e) {
@@ -206,9 +208,9 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                 if ((e.getStatusCode() == HTTP_NOT_FOUND) || ((error != null) && (error.getCode() == HTTP_NOT_FOUND))) {
                     throw new NoSuchFileException(e.getMessage());
                 }
-                logger.warn("Quota exceeded - Throttling 1st try");
-                executionSuccessful = false;
-                TimeUnit.SECONDS.sleep(8);
+                logger.warn("[repository-gcs][readBlob]Quota exceeded - Throttling 1st try");
+                
+                TimeUnit.SECONDS.sleep(2);
                 return readBlob(blobName,1);
             }
         });
@@ -222,10 +224,10 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @return an InputStream
      */
     InputStream readBlob(String blobName, Integer retryPosition) throws IOException {
-        return doPrivileged(() -> {
-            Boolean executionSuccessful = true;
+        return SocketAccess.doPrivilegedIOException(() -> {
+            
             try {
-                
+                logger.debug("Reading blob called " + blobName + " in retryable method");
                 Storage.Objects.Get object = client.objects().get(bucket, blobName);
                 return object.executeMediaAsInputStream();
             } catch (GoogleJsonResponseException e) {
@@ -234,8 +236,8 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                     throw new NoSuchFileException(e.getMessage());
                 }
                 if(retryPosition < MAX_RETRIES_HSM){
-                    logger.warn("Quota exceeded - Throttling " + retryPosition.toString() + " try");
-                    executionSuccessful = false;
+                    logger.warn("[repository-gcs][readBlob] Service gone. Retrying for #" + retryPosition.toString());
+                    logger.warn(e.getMessage());
                     TimeUnit.SECONDS.sleep(8);
                     return readBlob(blobName, retryPosition+1);
                 }else{
@@ -252,17 +254,33 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @param blobSize    expected size of the blob to be written
      */
     void writeBlob(String blobName, InputStream inputStream, long blobSize) throws IOException {
-        doPrivileged(() -> {
-            InputStreamContent stream = new InputStreamContent(null, inputStream);
-            stream.setLength(blobSize);
-
-            Storage.Objects.Insert insert = client.objects().insert(bucket, null, stream);
-            insert.setName(blobName);
-            insert.execute();
-            return null;
-        });
+        // We retry 410 GONE errors to cover the unlikely but possible scenario where a resumable upload session becomes broken and
+        // needs to be restarted from scratch. Given how unlikely a 410 error should be according to SLAs we retry only twice.
+        for(int retry = 0; retry < 3; retry++){
+            
+                try { 
+                    SocketAccess.doPrivilegedIOException( () -> {
+                        InputStreamContent stream = new InputStreamContent(null, inputStream);
+                        stream.setLength(blobSize);
+                        
+                        Storage.Objects.Insert insert = client.objects().insert(bucket, null, stream);
+                        insert.setName(blobName);
+                        insert.execute();
+                        return null;
+                    });
+                }catch(Exception e){
+                    
+                        logger.warn("[repository-gcs][writeBlob] Lost - Throttling try #" + retry );
+                        throw e;
+                }
+        
+        }
+		
     }
 
+  
+	
+	
     /**
      * Deletes a blob in the bucket
      *
@@ -272,7 +290,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
         if (!blobExists(blobName)) {
             throw new NoSuchFileException("Blob [" + blobName + "] does not exist");
         }
-        doPrivileged(() -> client.objects().delete(bucket, blobName).execute());
+        SocketAccess.doPrivilegedIOException(() -> client.objects().delete(bucket, blobName).execute());
     }
 
     /**
@@ -281,7 +299,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @param prefix prefix of the buckets to delete
      */
     void deleteBlobsByPrefix(String prefix) throws IOException {
-        doPrivileged(() -> {
+        SocketAccess.doPrivilegedIOException(() -> {
             deleteBlobs(listBlobsByPath(bucket, prefix, null).keySet());
             return null;
         });
@@ -302,7 +320,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
             return;
         }
 
-        doPrivileged(() -> {
+        SocketAccess.doPrivilegedIOException(() -> {
             final List<Storage.Objects.Delete> deletions = new ArrayList<>();
             final Iterator<String> blobs = blobNames.iterator();
 
@@ -355,7 +373,8 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @param targetBlob new name of the blob in the target bucket
      */
     void moveBlob(String sourceBlob, String targetBlob) throws IOException {
-        doPrivileged(() -> {
+        logger.debug("Moving blob from " + sourceBlob +  " to " + targetBlob);
+        SocketAccess.doPrivilegedIOException( () -> {
             // There's no atomic "move" in GCS so we need to copy and delete
             // client.objects().copy(bucket, sourceBlob, bucket, targetBlob, null).execute();
             client.objects().rewrite(bucket, sourceBlob, bucket, targetBlob,null).execute();
@@ -364,20 +383,7 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
         });
     }
 
-    /**
-     * Executes a {@link PrivilegedExceptionAction} with privileges enabled.
-     */
-    <T> T doPrivileged(PrivilegedExceptionAction<T> operation) throws IOException {
-        SecurityManager sm = System.getSecurityManager();
-        if (sm != null) {
-            sm.checkPermission(new SpecialPermission());
-        }
-        try {
-            return AccessController.doPrivileged((PrivilegedExceptionAction<T>) operation::run);
-        } catch (PrivilegedActionException e) {
-            throw (IOException) e.getException();
-        }
-    }
+   
 
     private String buildKey(String keyPath, String s) {
         assert s != null;

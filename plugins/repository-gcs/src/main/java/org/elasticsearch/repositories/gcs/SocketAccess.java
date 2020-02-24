@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.elasticsearch.repositories.gcs2;
+package org.elasticsearch.repositories.gcs;
 
 import org.elasticsearch.SpecialPermission;
 import org.elasticsearch.common.CheckedRunnable;
@@ -36,10 +36,15 @@ import java.security.PrivilegedExceptionAction;
  */
 final class SocketAccess {
 
-    private SocketAccess() {}
+    public static final SpecialPermission INSTANCE = new SpecialPermission();
+
+    
 
     public static <T> T doPrivilegedIOException(PrivilegedExceptionAction<T> operation) throws IOException {
-        SpecialPermission.check();
+        SecurityManager sm = System.getSecurityManager();
+        if (sm != null) {
+            sm.checkPermission(INSTANCE);
+        }
         try {
             return AccessController.doPrivileged(operation);
         } catch (PrivilegedActionException e) {
@@ -48,7 +53,10 @@ final class SocketAccess {
     }
 
     public static void doPrivilegedVoidIOException(CheckedRunnable<IOException> action) throws IOException {
-        SpecialPermission.check();
+        SecurityManager sm = System.getSecurityManager();
+        if (sm != null) {
+            sm.checkPermission(INSTANCE);
+        }
         try {
             AccessController.doPrivileged((PrivilegedExceptionAction<Void>) () -> {
                 action.run();
@@ -58,4 +66,6 @@ final class SocketAccess {
             throw (IOException) e.getCause();
         }
     }
+
+
 }
