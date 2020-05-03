@@ -24,6 +24,8 @@ import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.HttpBackOffIOExceptionHandler;
 import com.google.api.client.http.HttpBackOffUnsuccessfulResponseHandler;
 import com.google.api.client.http.HttpRequest;
+import com.google.api.client.http.HttpResponse;
+import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.http.HttpRequestInitializer;
 import com.google.api.client.http.HttpUnsuccessfulResponseHandler;
 import com.google.api.client.http.javanet.NetHttpTransport;
@@ -166,6 +168,27 @@ interface GoogleCloudStorageService {
 
                 final HttpUnsuccessfulResponseHandler handler = new HttpBackOffUnsuccessfulResponseHandler(newBackOff());
                 request.setUnsuccessfulResponseHandler((req, resp, supportsRetry) -> {
+                        if(resp.getStatusCode() == 308){
+                            HttpHeaders headersResponse = resp.getHeaders();
+                            String range = headersResponse.getFirstHeaderStringValue("Range");
+                            String location = headersResponse.getFirstHeaderStringValue("Location");
+                            String retryAfter = headersResponse.getFirstHeaderStringValue("Retry-After");
+                            logger.debug("Failed to execute HTTP Request. Retrying..");
+                            logger.debug(req.getContent());
+                            logger.debug(resp.parseAsString());
+                            logger.debug(resp.getStatusCode());
+                            logger.debug(resp.getStatusMessage());
+                            logger.debug(headersResponse);
+                            logger.debug(req.getHeaders());
+                            logger.debug("URL: " + req.getUrl());
+                            logger.debug("New range: " + range);
+                            logger.debug("retry-after: " + retryAfter);
+                            logger.debug("Location: " + location);
+                            
+                        }else {
+                            logger.debug("Status code: " + resp.getStatusCode());
+                            logger.debug(resp.getHeaders());
+                        }
                         // Let the credential handle the response. If it failed, we rely on our backoff handler
                         return credential.handleResponse(req, resp, supportsRetry) || handler.handleResponse(req, resp, supportsRetry);
                     }
