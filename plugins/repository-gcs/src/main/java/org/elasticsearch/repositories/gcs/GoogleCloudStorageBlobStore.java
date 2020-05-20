@@ -208,6 +208,9 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                 
                 logger.warn("[ReadBlob()] Lost - Throttling try #" + retry );
                 logger.warn(e);
+                if (retry == 2){
+                    throw e; 
+                }
             }
         }
         return null;
@@ -247,6 +250,9 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                     
                         logger.warn("[repository-gcs][writeBlob] Lost - Throttling try #" + retry );
                         logger.warn(e);
+                        if (retry == 2){
+                            throw e; 
+                        }
                 }
         
         }
