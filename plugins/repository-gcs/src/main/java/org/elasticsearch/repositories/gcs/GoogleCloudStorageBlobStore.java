@@ -197,55 +197,25 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
      * @return an InputStream
      */
     InputStream readBlob(String blobName) throws IOException {
-        return SocketAccess.doPrivilegedIOException(() -> {
-            
+        for(int retry = 0; retry < 3; retry++){
             try {
-                logger.debug("Reading blob called " + blobName);
-                Storage.Objects.Get object = client.objects().get(bucket, blobName);
-                return object.executeMediaAsInputStream();
-            } catch (GoogleJsonResponseException e) {
-                GoogleJsonError error = e.getDetails();
-                if ((e.getStatusCode() == HTTP_NOT_FOUND) || ((error != null) && (error.getCode() == HTTP_NOT_FOUND))) {
-                    throw new NoSuchFileException(e.getMessage());
-                }
-                logger.warn("[repository-gcs][readBlob]Quota exceeded - Throttling 1st try");
+                return SocketAccess.doPrivilegedIOException(() -> {
+                    logger.debug("Reading blob called " + blobName);
+                    Storage.Objects.Get object = client.objects().get(bucket, blobName);
+                    return object.executeMediaAsInputStream();
+                });
+            }catch(Exception e){
                 
-                TimeUnit.SECONDS.sleep(2);
-                return readBlob(blobName,1);
+                logger.warn("[ReadBlob()] Lost - Throttling try #" + retry );
+                logger.warn(e);
+                if (retry == 2){
+                    throw e; 
+                }
             }
-        });
+        }
+        return null;
     }
 
-    /** ADDITION OF A SECONDARY readBlob method that is being used for recursive retries with a hard stop specified by MAX_RETRIES_HSM
-     * Returns an {@link java.io.InputStream} for a given blob
-     *
-     * @param blobName name of the blob
-     * @param retryPosition current round of throttling for blob fetch - HSM Quota limit
-     * @return an InputStream
-     */
-    InputStream readBlob(String blobName, Integer retryPosition) throws IOException {
-        return SocketAccess.doPrivilegedIOException(() -> {
-            
-            try {
-                logger.debug("Reading blob called " + blobName + " in retryable method");
-                Storage.Objects.Get object = client.objects().get(bucket, blobName);
-                return object.executeMediaAsInputStream();
-            } catch (GoogleJsonResponseException e) {
-                GoogleJsonError error = e.getDetails();
-                if ((e.getStatusCode() == HTTP_NOT_FOUND) || ((error != null) && (error.getCode() == HTTP_NOT_FOUND))) {
-                    throw new NoSuchFileException(e.getMessage());
-                }
-                if(retryPosition < MAX_RETRIES_HSM){
-                    logger.warn("[repository-gcs][readBlob] Service gone. Retrying for #" + retryPosition.toString());
-                    logger.warn(e.getMessage());
-                    TimeUnit.SECONDS.sleep(8);
-                    return readBlob(blobName, retryPosition+1);
-                }else{
-                    throw e;
-                }
-            }
-        });
-    }
 
     /**
      * Writes a blob in the bucket.
@@ -259,19 +229,30 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
         for(int retry = 0; retry < 3; retry++){
             
                 try { 
+                    logger.debug("WriteBlob() try " + (retry+1));
                     SocketAccess.doPrivilegedIOException( () -> {
+                        logger.debug("Trying to write blob " + blobName);
                         InputStreamContent stream = new InputStreamContent(null, inputStream);
+                        logger.debug("Opened input stream");
                         stream.setLength(blobSize);
-                        
+                        logger.debug("Set blob size");
                         Storage.Objects.Insert insert = client.objects().insert(bucket, null, stream);
+                        logger.debug("Create insert operation");
                         insert.setName(blobName);
+                        insert.getMediaHttpUploader().setDirectUploadEnabled(false);
+                        logger.debug("Set blob name in the operation and also set resumable upload");
                         insert.execute();
+                        logger.debug("Executed blob insertion for" + blobName);
                         return null;
                     });
+                    return;
                 }catch(Exception e){
                     
                         logger.warn("[repository-gcs][writeBlob] Lost - Throttling try #" + retry );
-                        throw e;
+                        logger.warn(e);
+                        if (retry == 2){
+                            throw e; 
+                        }
                 }
         
         }
