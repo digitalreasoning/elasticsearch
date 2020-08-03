@@ -26,7 +26,7 @@ versions << [
 
 
 esplugin {
-  description 'The GCS repository plugin adds Google Cloud Storage support for repositories. Version: ${versions.rcbuild}'
+  description "The GCS repository plugin adds Google Cloud Storage support for repositories. Version: ${versions.rcbuild}"
   classname 'org.elasticsearch.repositories.gcs.GoogleCloudStoragePlugin'
 }
 
