@@ -208,7 +208,10 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                 if(e.getStatusCode() == 404){
                     throw new NoSuchFileException(e.getMessage());
                 } else {
-                    throw e;
+                    logger.warn(e);
+                    if(retry == 2) {
+                        throw e;
+                    }
                 }
             } catch(Exception e){
                 
