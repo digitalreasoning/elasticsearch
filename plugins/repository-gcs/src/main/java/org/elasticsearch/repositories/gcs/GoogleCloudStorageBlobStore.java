@@ -204,7 +204,13 @@ class GoogleCloudStorageBlobStore extends AbstractComponent implements BlobStore
                     Storage.Objects.Get object = client.objects().get(bucket, blobName);
                     return object.executeMediaAsInputStream();
                 });
-            }catch(Exception e){
+            }catch (GoogleJsonResponseException e) {
+                if(e.getStatusCode() == 404){
+                    throw new NoSuchFileException(e.getMessage());
+                } else {
+                    throw e;
+                }
+            } catch(Exception e){
                 
                 logger.warn("[ReadBlob()] Lost - Throttling try #" + retry );
                 logger.warn(e);
